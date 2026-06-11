@@ -1,0 +1,45 @@
+name: Build & Release Firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version string (e.g. 1.1)"
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install arduino-cli
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+          sudo mv bin/arduino-cli /usr/local/bin/
+          arduino-cli config init
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+
+      - name: Write private key
+        run: |
+          echo "${{ secrets.FIRMWARE_SIGNING_KEY }}" > private.key
+          chmod 600 private.key
+
+      - name: Embed public key
+        run: python sign_update.py --embed
+
+      - name: Compile firmware
+        run: |
+          arduino-cli compile --fqbn esp32:esp32:esp32wrover \
+            --output-dir /tmp/build vlc_tx
+
+      - name: Sign firmware
+        run: python sign_update.py /tmp/build/vlc_tx.ino.bin -v ${{ inputs.version }}
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-v${{ inputs.version }}
+          path: dist/v${{ inputs.version }}/
